@@ -20,9 +20,11 @@ import java.io.IOException;
 @RequiredArgsConstructor
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
     private final CustomUserDetailsService userDetailsService;
     private final JwtUtil jwtUtil;
 
+    // Extract token from cookie
     private String extractJwtFromCookie(HttpServletRequest request) {
         if (request.getCookies() == null) return null;
 
@@ -34,22 +36,36 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return null;
     }
 
+    // Clear token cookie
+    private void clearTokenCookie(HttpServletResponse response) {
+        Cookie cookie = new Cookie("token", null);
+        cookie.setHttpOnly(true);
+        cookie.setPath("/");
+        cookie.setMaxAge(0); // deletes cookie
+        response.addCookie(cookie);
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
 
-        //final String authHeader = request.getHeader("Authorization");
-        String email = null;
         String token = extractJwtFromCookie(request);
-
-//        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-//            token = authHeader.substring(7);
-//            email = jwtUtil.extractEmail(token);
-//        }
+        String email = null;
 
         if (token != null && !token.isEmpty()) {
-            email = jwtUtil.extractEmail(token);
+            try {
+                email = jwtUtil.extractEmail(token); // may throw ExpiredJwtException
+            } catch (io.jsonwebtoken.ExpiredJwtException e) {
+                // Token expired clear cookie
+                clearTokenCookie(response);
+                return;
+            } catch (Exception e) {
+                // Invalid token clear cookie
+                clearTokenCookie(response);
+                return;
+            }
         }
 
+        // Authenticate user if token is valid
         if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = userDetailsService.loadUserByUsername(email);
             if (jwtUtil.validateToken(token, userDetails.getUsername())) {
